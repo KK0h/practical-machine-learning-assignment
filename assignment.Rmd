@@ -1,0 +1,156 @@
+---
+title: "Practical Machine Learning Week 4 Assignment"
+author: "KGS Koh"
+date: "Saturday, February 25, 2017"
+output: html_document
+---
+
+This project aims to predict the manner in which participants perform barbell lifts. There were six participants and each were asked to perform unilateral dumbbell biceps curls in five different ways: according to specification (A), throwing the elbows to the front (B), lifting the dumbbell only halfway (C), lowering the dumbbell only halfway (D), and throwing the hips to the front (E). Data is obtained from accelerometers worn on the belt, arm, dumbbell and forearm of the participants. Using this data, we try to select a model that can predict the class of execution of the bicep curls. The data for this project comes from: http://groupware.les.inf.puc-rio.br/har. Reference is also made to the paper, "Qualitative Activity Recognition of Weight Lifting Exercises", by Velloso, E; Bulling, A; Gellersen, H; Ugulino, W and Fuks, H.
+
+First, we load the required packages and look at the data:
+```{r}
+library(dplyr)
+library(caret)
+data <- read.csv("pml-training.csv")
+dim(data)
+head(data)
+```
+
+We see that for each of the four accelerometer sensors, there is raw data of the 9 degrees of freedom Razor inertial measurement units (IMU), as mentioned in the paper quoted, which provide three-axes acceleration(eg. accel_forearm_x, accel_forearm_y, accel_forearm_z), gyroscope and magnetometer data, as well as the Euler angles (roll, pitch and yaw) and total acceleration. In addition there are eight derived features for each Euler angle of each sensor: mean, variance, standard deviation, max, min, amplitude, kurtosis and skewness.
+
+The data further shows a pattern of mostly NA for the eight derived features, except when 'new_window' column is 'yes'. This corresponds to the sliding window approach mentioned in the paper, hence the derived features are calculated over a window. The paper mentioned use of sliding windows varying from 0.5 seconds to 2.5 seconds. This suggests that we can compute our own derived features data using a window we select.
+```{r}
+datayes <- data %>% filter(new_window=="yes")
+head(datayes[,1:30])
+```
+
+Plot of Window Number, coloured by Class:
+```{r, echo=FALSE}
+library(RColorBrewer)
+cols <- brewer.pal(5,name="Set3")
+plot(data[,1], data$num_window, col = cols[data$classe])
+```
+
+We can thus group by Class and Window Number, thus giving discrete window length of 1 second, which is the simplest grouping.
+
+For the eight features, we leave out amplitude since this is a linear combination of maximum and minimum. Deriving the features to come up with a derived data table:
+
+1. Belt
+```{r}
+library(moments)
+belt1 <- list(~mean(roll_belt), ~mean(pitch_belt), ~mean(yaw_belt))
+belt2 <- list(~sd(roll_belt), ~sd(pitch_belt), ~sd(yaw_belt))
+belt3 <- list(~var(roll_belt), ~var(pitch_belt), ~var(yaw_belt))
+belt4 <- list(~min(roll_belt), ~min(pitch_belt), ~min(yaw_belt))
+belt5 <- list(~max(roll_belt), ~max(pitch_belt), ~max(yaw_belt))
+belt6 <- list(~skewness(roll_belt), ~skewness(pitch_belt), ~skewness(yaw_belt))
+belt7 <- list(~kurtosis(roll_belt), ~kurtosis(pitch_belt), ~kurtosis(yaw_belt))
+beltall <- c(belt1, belt2, belt3, belt4, belt5, belt6, belt7)
+```
+
+Do likewise for:
+
+2. Arm
+```{r, echo=FALSE}
+arm1 <- list(~mean(roll_arm), ~mean(pitch_arm), ~mean(yaw_arm))
+arm2 <- list(~sd(roll_arm), ~sd(pitch_arm), ~sd(yaw_arm))
+arm3 <- list(~var(roll_arm), ~var(pitch_arm), ~var(yaw_arm))
+arm4 <- list(~min(roll_arm), ~min(pitch_arm), ~min(yaw_arm))
+arm5 <- list(~max(roll_arm), ~max(pitch_arm), ~max(yaw_arm))
+arm6 <- list(~skewness(roll_arm), ~skewness(pitch_arm), ~skewness(yaw_arm))
+arm7 <- list(~kurtosis(roll_arm), ~kurtosis(pitch_arm), ~kurtosis(yaw_arm))
+armall <- c(arm1, arm2, arm3, arm4, arm5, arm6, arm7)
+```
+
+3. Dumbbell
+```{r, echo=FALSE}
+dumbbell1 <- list(~mean(roll_dumbbell), ~mean(pitch_dumbbell), ~mean(yaw_dumbbell))
+dumbbell2 <- list(~sd(roll_dumbbell), ~sd(pitch_dumbbell), ~sd(yaw_dumbbell))
+dumbbell3 <- list(~var(roll_dumbbell), ~var(pitch_dumbbell), ~var(yaw_dumbbell))
+dumbbell4 <- list(~min(roll_dumbbell), ~min(pitch_dumbbell), ~min(yaw_dumbbell))
+dumbbell5 <- list(~max(roll_dumbbell), ~max(pitch_dumbbell), ~max(yaw_dumbbell))
+dumbbell6 <- list(~skewness(roll_dumbbell), ~skewness(pitch_dumbbell), ~skewness(yaw_dumbbell))
+dumbbell7 <- list(~kurtosis(roll_dumbbell), ~kurtosis(pitch_dumbbell), ~kurtosis(yaw_dumbbell))
+dumbbellall <- c(dumbbell1, dumbbell2, dumbbell3, dumbbell4, dumbbell5, dumbbell6, dumbbell7)
+```
+
+4. Forearm
+```{r, echo=FALSE}
+forearm1 <- list(~mean(roll_forearm), ~mean(pitch_forearm), ~mean(yaw_forearm))
+forearm2 <- list(~sd(roll_forearm), ~sd(pitch_forearm), ~sd(yaw_forearm))
+forearm3 <- list(~var(roll_forearm), ~var(pitch_forearm), ~var(yaw_forearm))
+forearm4 <- list(~min(roll_forearm), ~min(pitch_forearm), ~min(yaw_forearm))
+forearm5 <- list(~max(roll_forearm), ~max(pitch_forearm), ~max(yaw_forearm))
+forearm6 <- list(~skewness(roll_forearm), ~skewness(pitch_forearm), ~skewness(yaw_forearm))
+forearm7 <- list(~kurtosis(roll_forearm), ~kurtosis(pitch_forearm), ~kurtosis(yaw_forearm))
+forearmall <- c(forearm1, forearm2, forearm3, forearm4, forearm5, forearm6, forearm7)
+```
+
+Finally, the raw features are copied:
+```{r}
+othersbelt <- list(~mean(total_accel_belt), ~var(total_accel_belt), ~mean(gyros_belt_x), ~mean(gyros_belt_y), ~mean(gyros_belt_z), ~mean(accel_belt_x), ~mean(accel_belt_y), ~mean(accel_belt_z), ~mean(magnet_belt_x), ~mean(magnet_belt_y), ~mean(magnet_belt_z))
+othersarm <- list(~mean(total_accel_arm), ~var(total_accel_arm), ~mean(gyros_arm_x), ~mean(gyros_arm_y), ~mean(gyros_arm_z), ~mean(accel_arm_x), ~mean(accel_arm_y), ~mean(accel_arm_z), ~mean(magnet_arm_x), ~mean(magnet_arm_y), ~mean(magnet_arm_z))
+othersdumbbell <- list(~mean(total_accel_dumbbell), ~var(total_accel_dumbbell), ~mean(gyros_dumbbell_x), ~mean(gyros_dumbbell_y), ~mean(gyros_dumbbell_z), ~mean(accel_dumbbell_x), ~mean(accel_dumbbell_y), ~mean(accel_dumbbell_z), ~mean(magnet_dumbbell_x), ~mean(magnet_dumbbell_y), ~mean(magnet_dumbbell_z))
+othersforearm <- list(~mean(total_accel_forearm), ~var(total_accel_forearm), ~mean(gyros_forearm_x), ~mean(gyros_forearm_y), ~mean(gyros_forearm_z), ~mean(accel_forearm_x), ~mean(accel_forearm_y), ~mean(accel_forearm_z), ~mean(magnet_forearm_x), ~mean(magnet_forearm_y), ~mean(magnet_forearm_z))
+```
+
+The derived data table:
+```{r}
+data1 <- data %>% group_by(classe, num_window) %>% summarise_(.dots = c(beltall, othersbelt, armall, othersarm, dumbbellall, othersdumbbell, forearmall, othersforearm)) %>% select(-2)
+dim(data1)
+```
+
+From this data table, we separate the rows into a train set and test set: 
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(data1$classe, p=0.7, list=FALSE)
+trainfit <- data1[inTrain,]
+testfit <- data1[-inTrain,]
+```
+
+We use decision tree learning as it does not require and is not sensitive to decisions on preprocessing. Furthermore, we use a random forest model as this averages over several decision trees, and avoids overfitting of a single tree. The optimal number of trees is determined by a 10-fold cross-validation.
+
+```{r}
+modfit <- train(classe ~., data=data1, method= "rf", trControl= trainControl(method="cv"), na.action=na.exclude)
+testfitcomplete <- testfit[complete.cases(testfit[,2:129]),]
+predtestfit <- predict(modfit, testfit)
+confusionMatrix(testfitcomplete$classe, predtestfit)
+```
+
+The accuracy is 1 for the 150 complete cases in the test (validation) partition.
+
+Next, we look at the supplied 'pml-testing.csv' data to see if the model fits the new data.
+
+```{r}
+testcases <- read.csv("pml-testing.csv")
+fun2 <- function(x) {sum(is.na(x))/length(x) < 0.1}
+naremove <- apply(testcases,2,fun2)
+testcases <- testcases[,naremove]
+dim(testcases)
+names(testcases)
+```
+
+Alas, after removing columns with substantial amount of NA (90% or more), the remaining columns do not contain any of the eight (or seven, if Amplitude is excluded) derived features. We could refit a model using all 19622 rows of raw data and remove all those columns with substantial NA. However, an alternative would be to keep our window-based data set (858 rows) but using only the Mean features to refit a model and predict on the raw features of the new data.
+
+Data set recleaned:
+```{r}
+dotsnew <- c(belt1, othersbelt[-2], arm1, othersarm[-2], dumbbell1, othersdumbbell[-2], forearm1, othersforearm[-2])
+datanew <- data %>% group_by(classe, num_window) %>% summarise_(.dots = dotsnew) %>% select(-2)
+dim(datanew)
+names(datanew)
+colnames(testcases)[8:59] <- colnames(datanew)[2:53]
+```
+
+Refit the random forest model:
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(datanew$classe, p=0.7, list=FALSE)
+trainfnew <- datanew[inTrain,]
+testfnew <- datanew[-inTrain,]
+
+modfitnew <- train(classe ~., data=datanew, method= "rf", trControl= trainControl(method="cv"), na.action=na.exclude)
+testfcompnew <- testfnew[complete.cases(testfnew[,2:53]),]
+predtestfnew <- predict(modfitnew, testfnew)
+confusionMatrix(testfcompnew$classe, predtestfnew)
+```
+The model works well too using only the Mean features, correctly classifying all 255 cases in the test (validation) partition. Although the model still has a high degree of accuracy in predicting the test set, it may not perform as well on the 'pml-training.csv' data. The prediction ought to be more accurate using our first derived data set as it has more variables, provided the out of sample data set also contains the derived features (standard deviation, variance, kurtosis, etc.)
